@@ -13,62 +13,51 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	r := mux.NewRouter()
-	r.HandleFunc("/{namespace}/{key}/{value}", func(w http.ResponseWriter, r *http.Request) {
+	router := mux.NewRouter()
+	router.HandleFunc("/{namespace}/{key}/{value}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
 		key := vars["key"]
 		value := vars["value"]
-		tx, err := db.Begin(true)
+		err = db.Update(func(tx *bolt.Tx) error {
+			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
+			if err != nil {
+				return err
+			}
+			err = bucket.Put([]byte(key), []byte(value))
+			if err != nil {
+				return err
+			}
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write([]byte("ok"))
+			return err
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
 		}
-		bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		err = bucket.Put([]byte(key), []byte(value))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
 	})
-	r.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
 		key := vars["key"]
-		tx, err := db.Begin(true)
+		err = db.Update(func(tx *bolt.Tx) error {
+			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
+			if err != nil {
+				return err
+			}
+			value := bucket.Get([]byte(key))
+			_, err = w.Write(value)
+			return err
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
 		}
-		bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		val := bucket.Get([]byte(key))
-		if err := tx.Commit(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Write(val)
 	})
 	srv := &http.Server{
-		Handler: r,
-		Addr:    ":28080",
-		// Good practice: enforce timeouts for servers you create!
+		Handler:      router,
+		Addr:         ":28080",
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
-
 	log.Fatal(srv.ListenAndServe())
 }
