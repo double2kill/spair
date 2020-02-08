@@ -1,11 +1,12 @@
 package main
 
 import (
-	"github.com/boltdb/bolt"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/boltdb/bolt"
+	"github.com/gorilla/mux"
 )
 
 func main() {
@@ -14,6 +15,9 @@ func main() {
 		log.Fatal(err)
 	}
 	router := mux.NewRouter()
+
+	router.Use(addAccessControlAllowOrigin)
+
 	router.HandleFunc("/{namespace}/{key}/{value}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
@@ -52,7 +56,8 @@ func main() {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
+	}).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodOptions)
+
 	srv := &http.Server{
 		Handler:      router,
 		Addr:         ":28080",
@@ -60,4 +65,11 @@ func main() {
 		ReadTimeout:  15 * time.Second,
 	}
 	log.Fatal(srv.ListenAndServe())
+}
+
+func addAccessControlAllowOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next.ServeHTTP(w, r)
+	})
 }
