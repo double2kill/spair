@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -57,6 +58,33 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodOptions)
+
+	router.HandleFunc("/{namespace}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		namespace := vars["namespace"]
+		err = db.Update(func(tx *bolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists([]byte(namespace))
+			if err != nil {
+				return err
+			}
+			return err
+		})
+		db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(namespace))
+
+			var st []string
+			b.ForEach(func(k, v []byte) error {
+				st = append(st, string(k))
+				return nil
+			})
+			res, err := json.Marshal(st)
+			if err != nil {
+			}
+			
+		  w.Write(res)
+			return nil
+		})
+	})
 
 	srv := &http.Server{
 		Handler:      router,
