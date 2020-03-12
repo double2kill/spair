@@ -11,6 +11,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	db, err := bolt.Open("spair.db", 0644, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -18,6 +20,7 @@ func main() {
 	router := mux.NewRouter()
 
 	router.Use(addAccessControlAllowOrigin)
+	router.Use(loggerHandler)
 
 	router.HandleFunc("/{namespace}/{key}/{value}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -86,12 +89,14 @@ func main() {
 		})
 	})
 
+	PORT := "28080"
 	srv := &http.Server{
 		Handler:      router,
-		Addr:         ":28080",
+		Addr:         ":" + PORT,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
+	log.Print("Server running at http://127.0.0.1:" + PORT)
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -99,5 +104,15 @@ func addAccessControlAllowOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		next.ServeHTTP(w, r)
+	})
+}
+
+func loggerHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time_request := time.Now()
+		next.ServeHTTP(w, r)
+		time_close := time.Now()
+		duration := time_close.Sub(time_request)
+		log.Print(r.URL.Path + " " + duration.String())
 	})
 }
