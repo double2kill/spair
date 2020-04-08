@@ -30,8 +30,39 @@ func main() {
 	}
 	router := mux.NewRouter()
 
-	router.Use(addAccessControlAllowOrigin)
+	router.Use(addResponsCORSHeader)
 	router.Use(loggerHandler)
+
+	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
+
+    if r.Method == http.MethodOptions {
+        return
+    }
+
+		vars := mux.Vars(r)
+		namespace := vars["namespace"]
+		key := vars["key"]
+		err = db.Update(func(tx *bolt.Tx) error {
+			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
+			if err != nil {
+				return err
+			}
+			value := bucket.Get([]byte(key))
+			var data ValueData
+			jsonErr:=json.Unmarshal(value,&data)
+			response := []byte(data.Value)
+			
+			//兼容旧数据
+			if(jsonErr != nil) {
+				response = value
+			}
+			_, err = w.Write(response)
+			return err
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}).Methods(http.MethodGet, http.MethodOptions)
 
 	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -68,32 +99,6 @@ func main() {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}).Methods(http.MethodPost)
-
-	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		namespace := vars["namespace"]
-		key := vars["key"]
-		err = db.Update(func(tx *bolt.Tx) error {
-			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
-			if err != nil {
-				return err
-			}
-			value := bucket.Get([]byte(key))
-			var data ValueData
-			jsonErr:=json.Unmarshal(value,&data)
-			response := []byte(data.Value)
-			
-			//兼容旧数据
-			if(jsonErr != nil) {
-				response = value
-			}
-			_, err = w.Write(response)
-			return err
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -148,6 +153,8 @@ func main() {
 		})
 	})
 
+	router.Use(mux.CORSMethodMiddleware(router))
+
 	PORT := "28080"
 	srv := &http.Server{
 		Handler:      router,
@@ -159,9 +166,10 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func addAccessControlAllowOrigin(next http.Handler) http.Handler {
+func addResponsCORSHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		next.ServeHTTP(w, r)
 	})
 }
