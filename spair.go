@@ -10,6 +10,17 @@ import (
 	"github.com/gorilla/mux"
 )
 
+type ValueData struct {
+	Value string `json:"value"`
+	UpdateTime int64 `json:"update_time"`
+}
+
+type ListItem struct {
+	Key string `json:"key"`
+	UpdateTime int64 `json:"update_time"`
+	Value string `json:"value"`
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -22,17 +33,30 @@ func main() {
 	router.Use(addAccessControlAllowOrigin)
 	router.Use(loggerHandler)
 
-	router.HandleFunc("/{namespace}/{key}/{value}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
 		key := vars["key"]
-		value := vars["value"]
+
+		decoder := json.NewDecoder(r.Body)
+    var data ValueData
+    err := decoder.Decode(&data)
+    if err != nil {
+      panic(err)
+		}
+		data.UpdateTime = time.Now().UnixNano() / 1e6
+		
+    jsonData, err := json.Marshal(data)
+    if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+		
 		err = db.Update(func(tx *bolt.Tx) error {
 			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
 			if err != nil {
 				return err
 			}
-			err = bucket.Put([]byte(key), []byte(value))
+			err = bucket.Put([]byte(key), []byte(string(jsonData)))
 			if err != nil {
 				return err
 			}
@@ -43,7 +67,8 @@ func main() {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
+	}).Methods(http.MethodPost)
+
 	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
@@ -54,13 +79,38 @@ func main() {
 				return err
 			}
 			value := bucket.Get([]byte(key))
-			_, err = w.Write(value)
+			var data ValueData
+			jsonErr:=json.Unmarshal(value,&data)
+			response := []byte(data.Value)
+			
+			//兼容旧数据
+			if(jsonErr != nil) {
+				response = value
+			}
+			_, err = w.Write(response)
 			return err
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	}).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodOptions)
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		namespace := vars["namespace"]
+		key := vars["key"]
+		err = db.Update(func(tx *bolt.Tx) error {
+			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
+			if err != nil {
+				return err
+			}
+			err = bucket.Delete([]byte(key))
+			return err
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}).Methods(http.MethodDelete)
 
 	router.HandleFunc("/{namespace}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -75,14 +125,23 @@ func main() {
 		db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(namespace))
 
-			var st []string
+			var list []ListItem
 			b.ForEach(func(k, v []byte) error {
-				st = append(st, string(k))
+
+				var listItem ListItem
+				jsonErr:=json.Unmarshal(v,&listItem)
+				
+				//兼容旧数据
+				if(jsonErr != nil) {
+					// response = value
+				}
+
+				listItem.Key = string(k)
+
+				list = append(list, listItem)
 				return nil
 			})
-			res, err := json.Marshal(st)
-			if err != nil {
-			}
+			res, _ := json.Marshal(list)
 			
 		  w.Write(res)
 			return nil
@@ -113,6 +172,6 @@ func loggerHandler(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		time_close := time.Now()
 		duration := time_close.Sub(time_request)
-		log.Print(r.URL.Path + " " + duration.String())
+		log.Print(r.Method + " "+  r.URL.Path + " " + duration.String())
 	})
 }
