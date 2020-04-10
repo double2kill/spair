@@ -18,7 +18,7 @@ type ValueData struct {
 type ListItem struct {
 	Key string `json:"key"`
 	UpdateTime int64 `json:"update_time"`
-	Value string `json:"value"`
+	Value json.RawMessage `json:"value"`
 }
 
 func main() {
