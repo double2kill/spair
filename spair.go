@@ -11,7 +11,7 @@ import (
 )
 
 type ValueData struct {
-	Value string `json:"value"`
+	Value json.RawMessage `json:"value"`
 	UpdateTime int64 `json:"update_time"`
 }
 
