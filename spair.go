@@ -18,7 +18,7 @@ type ValueData struct {
 type ListItem struct {
 	Key string `json:"key"`
 	UpdateTime int64 `json:"update_time"`
-	Value json.RawMessage `json:"value"`
+	Value interface{} `json:"value"`
 }
 
 func main() {
@@ -73,13 +73,15 @@ func main() {
     var data ValueData
     err := decoder.Decode(&data)
     if err != nil {
-      panic(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		data.UpdateTime = time.Now().UnixNano() / 1e6
 		
     jsonData, err := json.Marshal(data)
     if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
     }
 		
 		err = db.Update(func(tx *bolt.Tx) error {
@@ -131,14 +133,15 @@ func main() {
 			b := tx.Bucket([]byte(namespace))
 
 			var list []ListItem
-			b.ForEach(func(k, v []byte) error {
+			b.ForEach(func(k, value []byte) error {
 
 				var listItem ListItem
-				jsonErr:=json.Unmarshal(v,&listItem)
+				jsonErr:=json.Unmarshal(value,&listItem)
 				
 				//兼容旧数据
 				if(jsonErr != nil) {
-					// response = value
+					listItem.UpdateTime = 0
+					listItem.Value = string(value)
 				}
 
 				listItem.Key = string(k)
