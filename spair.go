@@ -18,8 +18,8 @@ type ValueData struct {
 
 type ListItem struct {
 	Key        string      `json:"key"`
-	UpdateTime int64       `json:"update_time"`
 	Value      interface{} `json:"value"`
+	UpdateTime int64       `json:"update_time"`
 }
 
 type KeyValueList []ListItem
@@ -45,8 +45,9 @@ func main() {
 	}
 	router := mux.NewRouter()
 
-	router.Use(addResponsCORSHeader)
 	router.Use(loggerHandler)
+	router.Use(addResponsCORSHeader)
+	router.Use(addUserHeader)
 
 	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 
@@ -137,6 +138,7 @@ func main() {
 	router.HandleFunc("/{namespace}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
+
 		err = db.Update(func(tx *bolt.Tx) error {
 			_, err := tx.CreateBucketIfNotExists([]byte(namespace))
 			if err != nil {
@@ -147,7 +149,7 @@ func main() {
 		db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(namespace))
 
-			var list KeyValueList
+			list := KeyValueList{}
 			b.ForEach(func(k, value []byte) error {
 
 				var listItem ListItem
@@ -195,12 +197,33 @@ func addResponsCORSHeader(next http.Handler) http.Handler {
 	})
 }
 
+func addUserHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+
+		namespace := vars["namespace"]
+
+		queryUser := r.URL.Query().Get("user")
+		if queryUser != "" {
+			namespace += "/user/" + queryUser
+			log.SetPrefix(queryUser + " ")
+		} else {
+			log.SetPrefix("default" + " ")
+		}
+
+		vars["namespace"] = namespace
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func loggerHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time_request := time.Now()
 		next.ServeHTTP(w, r)
 		time_close := time.Now()
 		duration := time_close.Sub(time_request)
+
 		log.Print(r.Method + " " + r.URL.Path + " " + duration.String())
 	})
 }
