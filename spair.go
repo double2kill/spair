@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -11,14 +12,28 @@ import (
 )
 
 type ValueData struct {
-	Value json.RawMessage `json:"value"`
-	UpdateTime int64 `json:"update_time"`
+	Value      json.RawMessage `json:"value"`
+	UpdateTime int64           `json:"update_time"`
 }
 
 type ListItem struct {
-	Key string `json:"key"`
-	UpdateTime int64 `json:"update_time"`
-	Value interface{} `json:"value"`
+	Key        string      `json:"key"`
+	UpdateTime int64       `json:"update_time"`
+	Value      interface{} `json:"value"`
+}
+
+type KeyValueList []ListItem
+
+func (a KeyValueList) Len() int {
+	return len(a)
+}
+
+func (a KeyValueList) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+func (l KeyValueList) Less(i, j int) bool {
+	return l[i].UpdateTime > l[j].UpdateTime
 }
 
 func main() {
@@ -35,9 +50,9 @@ func main() {
 
 	router.HandleFunc("/{namespace}/{key}", func(w http.ResponseWriter, r *http.Request) {
 
-    if r.Method == http.MethodOptions {
-        return
-    }
+		if r.Method == http.MethodOptions {
+			return
+		}
 
 		vars := mux.Vars(r)
 		namespace := vars["namespace"]
@@ -49,11 +64,11 @@ func main() {
 			}
 			value := bucket.Get([]byte(key))
 			var data ValueData
-			jsonErr:=json.Unmarshal(value,&data)
+			jsonErr := json.Unmarshal(value, &data)
 			response := []byte(data.Value)
-			
+
 			//兼容旧数据
-			if(jsonErr != nil) {
+			if jsonErr != nil {
 				response = value
 			}
 			_, err = w.Write(response)
@@ -70,20 +85,20 @@ func main() {
 		key := vars["key"]
 
 		decoder := json.NewDecoder(r.Body)
-    var data ValueData
-    err := decoder.Decode(&data)
-    if err != nil {
+		var data ValueData
+		err := decoder.Decode(&data)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		data.UpdateTime = time.Now().UnixNano() / 1e6
-		
-    jsonData, err := json.Marshal(data)
-    if err != nil {
+
+		jsonData, err := json.Marshal(data)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-    }
-		
+		}
+
 		err = db.Update(func(tx *bolt.Tx) error {
 			bucket, err := tx.CreateBucketIfNotExists([]byte(namespace))
 			if err != nil {
@@ -132,14 +147,14 @@ func main() {
 		db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(namespace))
 
-			var list []ListItem
+			var list KeyValueList
 			b.ForEach(func(k, value []byte) error {
 
 				var listItem ListItem
-				jsonErr:=json.Unmarshal(value,&listItem)
-				
+				jsonErr := json.Unmarshal(value, &listItem)
+
 				//兼容旧数据
-				if(jsonErr != nil) {
+				if jsonErr != nil {
 					listItem.UpdateTime = 0
 					listItem.Value = string(value)
 				}
@@ -149,9 +164,12 @@ func main() {
 				list = append(list, listItem)
 				return nil
 			})
+
+			sort.Sort(list)
+
 			res, _ := json.Marshal(list)
-			
-		  w.Write(res)
+
+			w.Write(res)
 			return nil
 		})
 	})
@@ -183,6 +201,6 @@ func loggerHandler(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		time_close := time.Now()
 		duration := time_close.Sub(time_request)
-		log.Print(r.Method + " "+  r.URL.Path + " " + duration.String())
+		log.Print(r.Method + " " + r.URL.Path + " " + duration.String())
 	})
 }
